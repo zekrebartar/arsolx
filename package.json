@@ -1,0 +1,13 @@
+{
+  "name": "arsolx-subscription-bot",
+  "version": "1.0.0",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "mongodb": "^6.8.0",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
