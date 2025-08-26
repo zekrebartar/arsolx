@@ -1,4 +1,3 @@
-// bot.js
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const mongoose = require('mongoose');
@@ -56,7 +55,7 @@ async function createInviteLinkForUser(expireDate) {
   const expireUnix = Math.floor(new Date(expireDate).getTime() / 1000);
   const linkObj = await bot.createChatInviteLink(CHANNEL_ID, {
     expire_date: expireUnix,
-    creates_join_request: true, // فقط با تایید بات وارد می‌شود
+    creates_join_request: true,
     name: `ArsolX-${expireUnix}`
   });
   return linkObj.invite_link;
@@ -76,7 +75,6 @@ async function approveIfActive(chatId, userId) {
 
 async function kickUserFromChannel(userId) {
   try {
-    // Ban to force leave, then unban to allow future re-join after تمدید
     await bot.banChatMember(CHANNEL_ID, userId);
     await bot.unbanChatMember(CHANNEL_ID, userId, { only_if_banned: true });
     return true;
@@ -88,10 +86,9 @@ async function kickUserFromChannel(userId) {
 
 // ====== Commands ======
 bot.onText(/^\/start$/, (ctx) => {
-  bot.sendMessage(ctx.chat.id, 'سلام! کد اشتراک خود را با دستور زیر وارد کنید:\n\n/use YOURCODE');
+  bot.sendMessage(ctx.chat.id, 'سلام! کد اشتراک خود را وارد کنید:');
 });
 
-// فقط ادمین تولید کد
 bot.onText(/^\/generate$/, async (msg) => {
   if (String(msg.from.id) !== ADMIN_ID) {
     return bot.sendMessage(msg.chat.id, '⛔ فقط ادمین می‌تواند کد بسازد.');
@@ -109,33 +106,33 @@ bot.onText(/^\/generate$/, async (msg) => {
   });
 });
 
-// کاربر کد را وارد می‌کند
-bot.onText(/^\/use\s+([A-Za-z0-9]{10})$/, async (msg, match) => {
+// ====== هندل تمام پیام‌های متنی برای کد اشتراک ======
+bot.on('message', async (msg) => {
+  if (!msg.text) return;
+  if (msg.text.startsWith('/')) return; // skip commands
+
   const chatId = msg.chat.id;
   const userId = msg.from.id;
   const username = msg.from.username || '';
-  const inputCode = match[1];
+  const inputCode = msg.text.trim();
 
   const codeDoc = await Code.findOne({ code: inputCode });
   if (!codeDoc) {
-    await bot.sendMessage(chatId, '❌ کد نامعتبر است.');
+    await bot.sendMessage(chatId, '❌ کد اشتراک صحیح نیست.');
     return;
   }
 
   const now = new Date();
 
-  // اگر کد قبلا استفاده شده
   if (codeDoc.isUsed && codeDoc.usedBy !== userId) {
     await bot.sendMessage(chatId, '⚠️ این کد قبلاً توسط کاربر دیگری استفاده شده است.');
     return;
   }
 
-  // اولین استفاده از کد
   let userDoc = await User.findOne({ userId, code: inputCode });
+
   if (!codeDoc.isUsed) {
     const expireDate = new Date(now.getTime() + codeDoc.expireDuration * 24 * 60 * 60 * 1000);
-
-    // ساخت لینک دعوت ویژه کاربر با تاریخ انقضای همان اشتراک
     const inviteLink = await createInviteLinkForUser(expireDate);
 
     userDoc = await User.create({
@@ -153,40 +150,37 @@ bot.onText(/^\/use\s+([A-Za-z0-9]{10})$/, async (msg, match) => {
     await codeDoc.save();
 
     await Log.create({ userId, action: 'code_redeemed', info: { code: inputCode, days: codeDoc.expireDuration } });
+    await Log.create({ userId, action: 'link_generated', info: { link: inviteLink } });
 
     await bot.sendMessage(chatId,
-      `✅ کد تایید شد.\n📅 اعتبار تا: ${expireDate.toLocaleString()}\n\n🔗 برای درخواست عضویت از لینک زیر استفاده کن:\n${inviteLink}\n\nℹ️ اگر از کانال خارج شدی، تا قبل از اتمام اشتراک می‌تونی دوباره با همین لینک درخواست بدی.`
+      `✅ کد تایید شد.\n📅 اعتبار تا: ${expireDate.toLocaleString()}\n\n🔗 لینک درخواست عضویت:\n${inviteLink}\n\nℹ️ اگر از کانال خارج شدی، تا قبل از اتمام اشتراک می‌تونی دوباره با همین لینک درخواست بدی.`
     );
-    await Log.create({ userId, action: 'link_generated', info: { link: inviteLink } });
     return;
   }
 
-  // کد قبلا توسط همین کاربر استفاده شده: بررسی اعتبار و ساخت/ارسال لینک جدید (در صورت نیاز)
-  const existingUser = await User.findOne({ userId, code: inputCode });
-  if (!existingUser) {
+  if (!userDoc) {
     await bot.sendMessage(chatId, '❌ داده کاربر یافت نشد.');
     return;
   }
 
-  if (existingUser.expireDate <= now) {
-    existingUser.status = 'expired';
-    await existingUser.save();
+  if (userDoc.expireDate <= now) {
+    userDoc.status = 'expired';
+    await userDoc.save();
     await bot.sendMessage(chatId, '⏳ اشتراک شما منقضی شده است.');
     return;
   }
 
-  // لینک جدید (تا زمان انقضای فعلی)
-  const freshLink = await createInviteLinkForUser(existingUser.expireDate);
-  existingUser.inviteLink = freshLink;
-  await existingUser.save();
+  const freshLink = await createInviteLinkForUser(userDoc.expireDate);
+  userDoc.inviteLink = freshLink;
+  await userDoc.save();
 
   await bot.sendMessage(chatId,
-    `✅ اشتراک فعال است.\n📅 اعتبار تا: ${existingUser.expireDate.toLocaleString()}\n\n🔗 لینک درخواست عضویت:\n${freshLink}`
+    `✅ اشتراک فعال است.\n📅 اعتبار تا: ${userDoc.expireDate.toLocaleString()}\n\n🔗 لینک درخواست عضویت:\n${freshLink}`
   );
   await Log.create({ userId, action: 'link_regenerated', info: { link: freshLink } });
 });
 
-// تایید درخواست عضویت کانال (Join Request)
+// ====== تایید درخواست عضویت کانال ======
 bot.on('chat_join_request', async (update) => {
   try {
     if (!update || !update.chat || !update.from) return;
@@ -195,7 +189,7 @@ bot.on('chat_join_request', async (update) => {
   } catch (_) {}
 });
 
-// چک دوره‌ای انقضا و حذف از کانال
+// ====== چک دوره‌ای انقضا ======
 const hourlyCheck = async () => {
   const now = new Date();
   const toExpire = await User.find({ status: 'active', expireDate: { $lte: now } });
@@ -206,8 +200,8 @@ const hourlyCheck = async () => {
     await Log.create({ userId: u.userId, action: kicked ? 'expired_kicked' : 'expired_kick_failed' });
   }
 };
-setInterval(hourlyCheck, 60 * 60 * 1000); // هر 1 ساعت
-hourlyCheck(); // اولین بار هنگام استارت
+setInterval(hourlyCheck, 60 * 60 * 1000);
+hourlyCheck();
 
-// هندل خطاها
+// ====== هندل خطا ======
 bot.on('polling_error', () => { /* silent */ });
