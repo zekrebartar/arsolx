@@ -1,12 +1,18 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const mongoose = require('mongoose');
+const express = require('express');
 
 // ====== ENV ======
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const MONGO_URI = process.env.MONGO_URI;
 const CHANNEL_ID = Number(process.env.CHANNEL_ID);
 const ADMIN_ID = String(process.env.ADMIN_ID);
+const PORT = process.env.PORT || 3000;
+
+const app = express();
+app.get('/', (req, res) => res.send('🤖 Bot is running!'));
+app.listen(PORT, () => console.log(`Express server listening on port ${PORT}`));
 
 // ====== DB ======
 mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
